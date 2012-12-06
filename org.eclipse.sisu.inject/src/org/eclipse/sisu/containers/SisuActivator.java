@@ -10,14 +10,20 @@
  *******************************************************************************/
 package org.eclipse.sisu.containers;
 
+import java.net.URL;
 import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Dictionary;
+import java.util.Enumeration;
 import java.util.Hashtable;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.google.inject.spi.ElementVisitor;
 import org.eclipse.sisu.BeanScanning;
+import org.eclipse.sisu.binders.ElementVisitorsProvider;
 import org.eclipse.sisu.binders.ParameterKeys;
 import org.eclipse.sisu.binders.SpaceModule;
 import org.eclipse.sisu.binders.WireModule;
@@ -26,6 +32,11 @@ import org.eclipse.sisu.locators.MutableBeanLocator;
 import org.eclipse.sisu.reflect.BundleClassSpace;
 import org.eclipse.sisu.reflect.ClassSpace;
 import org.eclipse.sisu.reflect.Logs;
+import org.eclipse.sisu.scanners.ClassFinder;
+import org.eclipse.sisu.scanners.analyzer.ElementVisitorFactory;
+import org.eclipse.sisu.scanners.analyzer.SisuElementVisitorFinder;
+import org.eclipse.sisu.scanners.module.ModuleFactory;
+import org.eclipse.sisu.scanners.module.SisuModuleFinder;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleActivator;
 import org.osgi.framework.BundleContext;
@@ -45,8 +56,7 @@ import com.google.inject.Module;
 /**
  * {@link BundleActivator} that maintains a dynamic {@link Injector} graph by scanning bundles as they come and go.
  */
-public final class SisuActivator
-    implements BundleActivator, BundleTrackerCustomizer, ServiceTrackerCustomizer
+public final class SisuActivator implements BundleActivator, BundleTrackerCustomizer, ServiceTrackerCustomizer
 {
     // ----------------------------------------------------------------------
     // Constants
@@ -68,6 +78,10 @@ public final class SisuActivator
 
     private BundleTracker bundleTracker;
 
+    private List<ModuleFactory> extensionModules;
+
+    private List<ElementVisitorFactory> extensionElementVisitors;
+
     // ----------------------------------------------------------------------
     // Public methods
     // ----------------------------------------------------------------------
@@ -79,6 +93,49 @@ public final class SisuActivator
         serviceTracker.open();
         bundleTracker = new BundleTracker( context, Bundle.STARTING | Bundle.ACTIVE, this );
         bundleTracker.open();
+        extensionModules = findExtensionFactories(context, ModuleFactory.class, new SisuModuleFinder(false));
+        extensionElementVisitors = findExtensionFactories(context, ElementVisitorFactory.class, new SisuElementVisitorFinder(false));
+    }
+
+    private <T> List<T> findExtensionFactories(BundleContext context, Class<T> extensionClass, ClassFinder classFinder)
+    {
+        final List<T> modules = new ArrayList<T>();
+        final BundleClassSpace classSpace = new BundleClassSpace(context.getBundle());
+        final Enumeration<URL> classes = classFinder.findClasses(classSpace);
+        while(classes.hasMoreElements())
+        {
+            final String className = getClassName(classes.nextElement());
+            modules.add(newExtensionFactory(classSpace.loadClass(className), extensionClass));
+        }
+        return Collections.unmodifiableList(modules);
+    }
+
+    private <T> T newExtensionFactory(Class<?> aClass, Class<T> expectedClass)
+    {
+        System.out.println("---> Instantiating "+aClass+"as " + expectedClass);
+        try
+        {
+            return expectedClass.cast(aClass.newInstance());
+        }
+        catch (InstantiationException e)
+        {
+            throw new RuntimeException(e);
+        }
+        catch (IllegalAccessException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String getClassName(URL url)
+    {
+        String className = url.getPath();
+        // remove leading "/"
+        className = className.charAt(0) == '/' ? className.substring(1) : className;
+        // all '/' to '.'
+        className = className.replaceAll("/", ".");
+        // remove '.class'
+        return className.substring(0, className.length() - ".class".length());
     }
 
     public void stop( final BundleContext context )
@@ -102,7 +159,7 @@ public final class SisuActivator
         {
             try
             {
-                new BundleInjector( bundle );
+                new BundleInjector( bundle, extensionModules, extensionElementVisitors );
             }
             catch ( final RuntimeException e )
             {
@@ -205,24 +262,53 @@ public final class SisuActivator
         private final Injector injector;
 
         private final BundleContext extendedBundleContext;
+        private final List<ElementVisitorFactory> extensionElementVisitors;
 
         // ----------------------------------------------------------------------
         // Constructors
         // ----------------------------------------------------------------------
 
-        BundleInjector( final Bundle bundle )
+        BundleInjector(final Bundle bundle, List<ModuleFactory> extensionModules, final List<ElementVisitorFactory> extensionElementVisitors)
         {
+            this.extensionElementVisitors = extensionElementVisitors;
             extendedBundleContext = bundle.getBundleContext();
             properties = new BundleProperties( extendedBundleContext );
 
             final ClassSpace space = new BundleClassSpace( bundle );
             final BeanScanning scanning = Main.selectScanning( properties );
 
-            injector = Guice.createInjector( new WireModule( this, new SpaceModule( space, scanning ) ) );
+
+            final List<Module> modules = new ArrayList<Module>();
+            modules.add(this);
+            modules.add(new SpaceModule( space, scanning ));
+            modules.addAll(toModules(bundle, extensionModules));
+
+            injector = Guice.createInjector( new WireModule(modules, new ElementVisitorsProvider()
+            {
+                public Iterable<ElementVisitor> provide(Binder binder)
+                {
+                    List<ElementVisitor> elementVisitors = new ArrayList<ElementVisitor>();
+                    for (ElementVisitorFactory extensionElementVisitor : extensionElementVisitors)
+                    {
+                        elementVisitors.add(extensionElementVisitor.create(bundle, binder));
+                    }
+                    return elementVisitors;
+                }
+            }) );
 
             final Dictionary<Object, Object> metadata = new Hashtable<Object, Object>();
             metadata.put( Constants.SERVICE_PID, CONTAINER_SYMBOLIC_NAME );
             extendedBundleContext.registerService( API, this, metadata );
+        }
+
+        private List<Module> toModules(Bundle bundle, List<ModuleFactory> extensionModules)
+        {
+            final List<Module> modules = new ArrayList<Module>(extensionModules.size());
+            for (ModuleFactory extensionModule : extensionModules)
+            {
+                modules.add(extensionModule.getModule(bundle));
+            }
+            return Collections.unmodifiableList(modules);
         }
 
         // ----------------------------------------------------------------------

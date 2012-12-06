@@ -11,8 +11,10 @@
 package org.eclipse.sisu.binders;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
+import com.google.inject.spi.ElementVisitor;
 import org.eclipse.sisu.converters.FileTypeConverter;
 import org.eclipse.sisu.converters.URLTypeConverter;
 import org.eclipse.sisu.locators.BeanLocator;
@@ -21,6 +23,7 @@ import com.google.inject.Binder;
 import com.google.inject.Module;
 import com.google.inject.spi.Element;
 import com.google.inject.spi.Elements;
+import org.eclipse.sisu.scanners.analyzer.ElementVisitorFactory;
 
 /**
  * Guice {@link Module} that automatically adds {@link BeanLocator}-backed bindings for non-local bean dependencies.
@@ -32,19 +35,31 @@ public class WireModule
     // Implementation fields
     // ----------------------------------------------------------------------
 
+    private final ElementVisitorsProvider extensionElementVisitorsProviders;
     private final List<Module> modules;
 
     // ----------------------------------------------------------------------
     // Constructors
     // ----------------------------------------------------------------------
 
-    public WireModule( final Module... modules )
+    public WireModule(Module... modules)
     {
-        this( Arrays.asList( modules ) );
+        this(Arrays.asList(modules));
     }
 
-    public WireModule( final List<Module> modules )
+    public WireModule(List<Module> modules)
     {
+        this(modules, new ElementVisitorsProvider()
+        {
+            public Iterable<ElementVisitor> provide(Binder binder)
+            {
+                return Collections.emptyList();
+            }
+        });
+    }
+    public WireModule(List<Module> modules, ElementVisitorsProvider extensionElementVisitorsProviders)
+    {
+        this.extensionElementVisitorsProviders = extensionElementVisitorsProviders;
         this.modules = modules;
     }
 
@@ -54,11 +69,16 @@ public class WireModule
 
     public void configure( final Binder binder )
     {
+        Iterable<ElementVisitor> elementVisitors = extensionElementVisitorsProviders.provide(binder);
         final ElementAnalyzer analyzer = getAnalyzer( binder );
         for ( final Module m : modules )
         {
             for ( final Element e : Elements.getElements( m ) )
             {
+                for (ElementVisitor<?> elementVisitor : elementVisitors)
+                {
+                    e.acceptVisitor(elementVisitor);
+                }
                 e.acceptVisitor( analyzer );
             }
         }

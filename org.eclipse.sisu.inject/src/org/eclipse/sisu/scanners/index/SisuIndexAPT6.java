@@ -66,7 +66,7 @@ public final class SisuIndexAPT6
                 {
                     if ( elem.getKind().isClass() )
                     {
-                        addClassToIndex( SisuIndex.NAMED, elementUtils.getBinaryName( (TypeElement) elem ) );
+                        addClassToIndex( anno.getQualifiedName().toString(), elementUtils.getBinaryName( (TypeElement) elem ) );
                     }
                 }
             }
@@ -88,7 +88,7 @@ public final class SisuIndexAPT6
 
     public Set<String> getSupportedAnnotationTypes()
     {
-        return Collections.singleton( Named.class.getName() );
+        return Collections.singleton( "*" );
     }
 
     public Set<String> getSupportedOptions()

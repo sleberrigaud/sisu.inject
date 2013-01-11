@@ -15,6 +15,7 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.Writer;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 
 import javax.annotation.processing.Completion;
@@ -66,7 +67,7 @@ public final class SisuIndexAPT6
                 {
                     if ( elem.getKind().isClass() )
                     {
-                        addClassToIndex( SisuIndex.NAMED, elementUtils.getBinaryName( (TypeElement) elem ) );
+                        addClassToIndex( anno.getQualifiedName().toString(), elementUtils.getBinaryName( (TypeElement) elem ) );
                     }
                 }
             }
@@ -88,7 +89,7 @@ public final class SisuIndexAPT6
 
     public Set<String> getSupportedAnnotationTypes()
     {
-        return Collections.singleton( Named.class.getName() );
+        return Collections.singleton( "*" );
     }
 
     public Set<String> getSupportedOptions()

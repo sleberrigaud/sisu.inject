@@ -132,9 +132,51 @@ public final class QualifiedTypeBinder
     }
 
     // ----------------------------------------------------------------------
+    // Child classes can override these to provide custom annotations for
+    // Singletons and EagerSingletons
+    // ----------------------------------------------------------------------
+
+    /**
+     * Returns the list of annotation classes that should be Eager Singletons
+     */
+    protected Class<? extends Annotation>[] getEagerTypes()
+    {
+        return new Class[]{EagerSingleton.class};
+    }
+
+    /**
+     * Returns the list of annotation classes that should be Eager Singletons
+     */
+    protected Class<? extends Annotation>[] getSingletonTypes()
+    {
+        return new Class[]{javax.inject.Singleton.class,com.google.inject.Singleton.class};
+    }
+    
+    // ----------------------------------------------------------------------
     // Implementation methods
     // ----------------------------------------------------------------------
 
+    /**
+     * Helper to check for annotations in arrays
+     * 
+     * @param type the class to check
+     * @param annos the array of annotations to look for
+     *              
+     * @return if an annotation exists
+     */
+    private boolean typeHasAnnotation(Class<?> type, Class<? extends Annotation>[] annos)
+    {
+        for(Class<? extends Annotation> anno : annos)
+        {
+            if(type.isAnnotationPresent(anno))
+            {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
     /**
      * Installs an instance of the given {@link Module}.
      * 
@@ -208,12 +250,11 @@ public final class QualifiedTypeBinder
         {
             final Key key = getBindingKey( params[0], getBindingName( providerType ) );
             final ScopedBindingBuilder sbb = binder.bind( key ).toProvider( providerType );
-            if ( providerType.isAnnotationPresent( EagerSingleton.class ) )
+            if ( typeHasAnnotation(providerType, getEagerTypes()))
             {
                 sbb.asEagerSingleton();
             }
-            else if ( providerType.isAnnotationPresent( javax.inject.Singleton.class )
-                || providerType.isAnnotationPresent( com.google.inject.Singleton.class ) )
+            else if (typeHasAnnotation(providerType, getSingletonTypes()) )
             {
                 sbb.in( Scopes.SINGLETON );
             }
@@ -238,7 +279,7 @@ public final class QualifiedTypeBinder
     private void bindQualifiedType( final Class<?> qualifiedType )
     {
         final ScopedBindingBuilder sbb = binder.bind( qualifiedType );
-        if ( qualifiedType.isAnnotationPresent( EagerSingleton.class ) )
+        if ( typeHasAnnotation(qualifiedType, getEagerTypes()) )
         {
             sbb.asEagerSingleton();
         }
